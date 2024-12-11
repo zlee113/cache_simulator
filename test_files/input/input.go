@@ -21,12 +21,22 @@ func main () {
 	var value int
 
 	// Read from file using Fscanf
-	_, err = fmt.Fscanf(file, "%s %c %d", &address, &t, &value)
-	if err != nil {
-		fmt.Println("Error reading from file:", err)
-		return
+	counts := make(map[string]int)
+	for {
+		_, err = fmt.Fscanf(file, "%s %c %d", &address, &t, &value)
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			fmt.Println("Error reading from file:", err)
+			return
+		}
+		counts[address]++
 	}
 
-	// Print the results
-	fmt.Printf("Address: %s\nType: %c\nValue: %d\n", address, t, value)
+	// Print the final map
+	fmt.Println("Final line counts:")
+	for key, value := range counts {
+		fmt.Printf("%s: %d\n", key, value)
+	}
 }
