@@ -33,6 +33,20 @@ void get_min(cache_t *cache, int32_t index) {
   cache->min = min;
 
 }
+/* Find the current minimum frequency value in the set */
+void (cache_t *cache, int32_t index) {
+
+  int min = cache->cache[index][0].freq;
+
+  for (int i = 0; i < NUM_OF_WAYS; i++) {
+    if (cache->cache[index][i].freq < min) {
+      min = cache->cache[index][i].freq;
+    }
+  }
+
+  cache->min = min;
+
+}
 
 
 /**
@@ -44,14 +58,18 @@ void get_min(cache_t *cache, int32_t index) {
  */
 void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
 
+  /* Get the starter low values for each set */
   int freq_low = cache->cache[index][0].freq;
   int recency_low = cache->cache[index][0].recency;
   int timestamp_low = cache->cache[index][0].timestamp;
   int new_index = 0;
+  /* If its LFU DA dynamically age and redo the minimum value */
   if (cache->policy == LFU_DA) {
     dynamically_age(cache, index);
     get_min(cache, index);
   }
+
+  /* Based on the replacement policy iterate through the whole cache */
   for (int i = 0; i < NUM_OF_WAYS; i++) {
     switch (cache->policy) {
     case FIFO:
@@ -91,6 +109,7 @@ void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
     }
   }
 
+  /* Replace the new line with the selected index */
   cache->cache[index][new_index] = *line;
 }
 
@@ -105,6 +124,7 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
   cache->accesses++;
   bool hit = false;
   for (int i = 0; i < NUM_OF_WAYS; i++) {
+    /* If there value is found */
     if (cache->cache[index][i].value == line->value &&
         cache->cache[index][i].address == line->address) {
       cache->read_hits++;
@@ -116,6 +136,7 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
       hit = true;
       break;
     }
+    /* If the an empty value is found */
     else if (cache->cache[index][i].address == 0) {
       cache->read_misses++;
       cache->cache[index][i] = *line;
@@ -123,6 +144,7 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
       break;
     }
   }
+  /* If no value is found */
   if (!hit) {
     cache->read_misses++;
     line->freq += cache->min;
@@ -141,6 +163,7 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
   cache->accesses++;
   bool hit = false;
   for (int i = 0; i < NUM_OF_WAYS; i++) {
+    /* If the value is found */
     if (cache->cache[index][i].value == line->value &&
         cache->cache[index][i].address == line->address) {
       cache->write_hits++;
@@ -152,6 +175,7 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
       hit = true;
       break;
     }
+    /* If an empty space is found */
     else if (cache->cache[index][i].address == 0) {
       cache->write_misses++;
       cache->cache[index][i] = *line;
@@ -162,6 +186,7 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
       break;
     }
   }
+  /* If a miss occurs */
   if (!hit) {
     cache->write_misses++;
     line->freq += cache->min;
