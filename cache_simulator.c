@@ -86,6 +86,14 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
       hit = true;
       break;
     }
+    else if (cache->cache[index][i].address == 0) {
+      cache->write_hits++;
+      cache->cache[index][i].recency = iterator;
+      cache->cache[index][i].freq++;
+      cache->cache[index][i] = *line;
+      hit = true;
+      break;
+    }
   }
   if (!hit) {
     cache->write_misses++;
