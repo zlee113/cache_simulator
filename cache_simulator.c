@@ -11,12 +11,39 @@
 
 int iterator = 0;
 
+
+/* Age every elements frequency in cache based on the current min */
+void dynamically_age(cache_t *cache, int32_t index) {
+  for (int i = 0; i < NUM_OF_WAYS; i++) {
+    cache->cache[index][i].freq -= cache->min;
+    }
+}
+
+/* Find the current minimum frequency value in the set */
+void get_min(cache_t *cache, int32_t index) {
+
+  int min = cache->cache[index][0].freq;
+
+  for (int i = 0; i < NUM_OF_WAYS; i++) {
+    if (cache->cache[index][i].freq < min) {
+      min = cache->cache[index][i].freq;
+    }
+  }
+
+  cache->min = min;
+
+}
+
 void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
 
   int freq_low = cache->cache[index][0].freq;
   int recency_low = cache->cache[index][0].recency;
   int timestamp_low = cache->cache[index][0].timestamp;
   int new_index = 0;
+  if (cache->policy == LFU_DA) {
+    dynamically_age(cache, index);
+    get_min(cache, index);
+  }
   for (int i = 0; i < NUM_OF_WAYS; i++) {
     switch (cache->policy) {
     case FIFO:
@@ -44,6 +71,10 @@ void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
       break;
 
     case LFU_DA:
+      if (freq_low > cache->cache[index][i].freq) {
+        freq_low = cache->cache[index][i].freq;
+        new_index = i;
+      }
       break;
 
     default:
@@ -64,6 +95,15 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
       cache->read_hits++;
       cache->cache[index][i].recency = iterator;
       cache->cache[index][i].freq++;
+      if (cache->policy == LFU_DA) {
+        cache->cache[index][i].freq += cache->min + 1;
+      }
+      hit = true;
+      break;
+    }
+    else if (cache->cache[index][i].address == 0) {
+      cache->read_misses++;
+      cache->cache[index][i] = *line;
       hit = true;
       break;
     }
@@ -83,14 +123,18 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
       cache->write_hits++;
       cache->cache[index][i].recency = iterator;
       cache->cache[index][i].freq++;
+      if (cache->policy == LFU_DA) {
+        cache->cache[index][i].freq += cache->min + 1;
+      }
       hit = true;
       break;
     }
     else if (cache->cache[index][i].address == 0) {
-      cache->write_hits++;
-      cache->cache[index][i].recency = iterator;
-      cache->cache[index][i].freq++;
+      cache->write_misses++;
       cache->cache[index][i] = *line;
+      if (cache->policy == LFU_DA) {
+        cache->cache[index][i].freq += cache->min;
+      }
       hit = true;
       break;
     }
@@ -111,14 +155,23 @@ void check_and_replace_cache(cache_t *cache, line_t *line, char type) {
 }
 
 void print_cache_stats(cache_t *cache) {
-  printf("Stats for %d\n", cache->policy);
+  if (cache->policy == 0)
+    printf("Stats for FIFO\n");
+  else if (cache->policy == 1)
+    printf("Stats for LRU\n");
+  else if (cache->policy == 2)
+    printf("Stats for LFU\n");
+  else if (cache->policy == 3)
+    printf("Stats for LFRU\n");
+  else if (cache->policy == 4)
+    printf("Stats for LFU Dynamic Aging\n");
   printf("Cache Accesses: %d\n", cache->accesses);
   printf("Read Hits:      %d\n", cache->read_hits);
   printf("Read Misses:    %d\n", cache->read_misses);
   printf("Write Hits:     %d\n", cache->write_hits);
   printf("Write Misses:   %d\n\n", cache->write_misses);
 }
-
+ 
 int main() {
 
   /* Structs holding all the info for each replacement policy */
@@ -131,16 +184,25 @@ int main() {
   cache_t lfu_cache = {0};
   lfu_cache.policy = LFU;
 
+  cache_t lrfu_cache = {0};
+  lrfu_cache.policy = LRFU;
+
+  cache_t lfu_da_cache = {0};
+  lfu_da_cache.policy = LFU_DA;
+
+  /* Open sample file and read in line by line */
   FILE *file = fopen("test_files/input/multiplication_input.txt", "r");
   int buffer = 0;
   char type = 'a';
   int val = 0;
 
   while (fscanf(file, "%x %c %d\n", &buffer, &type, &val) == 3) {
-    line_t line = {buffer, val, 0, 0, 0};
+    line_t line = {buffer, val, 0, iterator, iterator};
     check_and_replace_cache(&fifo_cache, &line, type);
     check_and_replace_cache(&lru_cache, &line, type);
     check_and_replace_cache(&lfu_cache, &line, type);
+    check_and_replace_cache(&lrfu_cache, &line, type);
+    check_and_replace_cache(&lfu_da_cache, &line, type);
     iterator++;
   }
   fclose(file);
@@ -148,6 +210,8 @@ int main() {
   print_cache_stats(&fifo_cache);
   print_cache_stats(&lru_cache);
   print_cache_stats(&lfu_cache);
+  print_cache_stats(&lrfu_cache);
+  print_cache_stats(&lfu_da_cache);
 
   return 0;
 }

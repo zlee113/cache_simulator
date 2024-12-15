@@ -33,6 +33,7 @@ typedef struct {
   replacement_policy_e policy; /* Replacement policy for cache */
   line_t cache[NUM_OF_SETS]
               [NUM_OF_WAYS]; /* Entire cache for the policy being tested */
+  int min;                   /* Min value of frequency for dynamic aging */
 } cache_t;
 
 #endif /* CACHE_SIMULATOR_H */
