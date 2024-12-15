@@ -34,6 +34,14 @@ void get_min(cache_t *cache, int32_t index) {
 
 }
 
+
+/**
+ * @brief Replace a single line in cache based on the replacement policy
+ *
+ * @param cache The cache with all its parameters
+ * @param index The set of the caches index
+ * @param line The line being used to replace with
+ */
 void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
 
   int freq_low = cache->cache[index][0].freq;
@@ -86,6 +94,13 @@ void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
   cache->cache[index][new_index] = *line;
 }
 
+/**
+ * @brief Attempt to read cache or replace if doesn't work
+ *
+ * @param cache The cache with all its parameters
+ * @param index The set of the caches index
+ * @param line The line being used to replace with
+ */
 void read_cache(cache_t *cache, uint32_t index, line_t *line) {
   cache->accesses++;
   bool hit = false;
@@ -110,10 +125,18 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
   }
   if (!hit) {
     cache->read_misses++;
+    line->freq += cache->min;
     replace_cache_line(cache, index, line);
   }
 }
 
+/**
+ * @brief Attempt to write cache or replace if doesn't work
+ *
+ * @param cache The cache with all its parameters
+ * @param index The set of the caches index
+ * @param line The line being used to replace with
+ */
 void write_cache(cache_t *cache, uint32_t index, line_t *line) {
   cache->accesses++;
   bool hit = false;
@@ -133,7 +156,7 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
       cache->write_misses++;
       cache->cache[index][i] = *line;
       if (cache->policy == LFU_DA) {
-        cache->cache[index][i].freq += cache->min;
+        cache->cache[index][i].freq += cache->min + 1;
       }
       hit = true;
       break;
@@ -141,6 +164,7 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
   }
   if (!hit) {
     cache->write_misses++;
+    line->freq += cache->min;
     replace_cache_line(cache, index, line);
   }
 }
