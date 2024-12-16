@@ -15,8 +15,8 @@
 typedef struct {
   int address;   /* Address for pointer of data */
   int value;     /* Value of data */
-  int freq;      /* Read frequency since added to cache */
-  int recency;   /* Last read */
+  float freq;      /* Read frequency since added to cache */
+  float recency;   /* Last read */
   int timestamp; /* Timestamp when first added */
 } line_t;
 
@@ -33,7 +33,7 @@ typedef struct {
   replacement_policy_e policy; /* Replacement policy for cache */
   line_t cache[NUM_OF_SETS]
               [NUM_OF_WAYS]; /* Entire cache for the policy being tested */
-  int min;                   /* Min value of frequency for dynamic aging */
+  float min;                   /* Min value of frequency for dynamic aging */
 } cache_t;
 
 #endif /* CACHE_SIMULATOR_H */
