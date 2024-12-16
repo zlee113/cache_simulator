@@ -145,8 +145,13 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
     else if (cache->cache[index][i].address == 0) {
       cache->read_misses++;
       cache->cache[index][i] = *line;
-      hit = true;
-      break;
+      if (cache->policy == LFU_DA) {
+        cache->cache[index][i].freq += cache->min + 1;
+      } else if (cache->policy == LRFU) {
+        cache->cache[index][i].freq = 1;
+        iterate_recencies(cache, index);
+        cache->cache[index][i].recency = 1;
+      }
     }
   }
   /* If no value is found */
