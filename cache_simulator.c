@@ -20,7 +20,7 @@ void dynamically_age(cache_t *cache, int32_t index) {
 
 /* Find the current minimum frequency value in the set */
 void get_min(cache_t *cache, int32_t index) {
-  float min = cache->cache[index][0].freq;
+  int min = cache->cache[index][0].freq;
   for (int i = 0; i < NUM_OF_WAYS; i++) {
     if (cache->cache[index][i].freq < min) {
       min = cache->cache[index][i].freq;
@@ -32,7 +32,7 @@ void get_min(cache_t *cache, int32_t index) {
 /* Make all the recencies increase by 1 */
 void iterate_recencies(cache_t *cache, int32_t index) {
   for (int i = 0; i < NUM_OF_WAYS; i++) {
-    cache->cache[index][i].recency++;
+    cache->cache[index][i].lfru_recency++;
   }
 }
 
@@ -46,8 +46,10 @@ void iterate_recencies(cache_t *cache, int32_t index) {
 void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
 
   /* Get the starter low values for each set */
-  float freq_low = cache->cache[index][0].freq;
-  float recency_low = cache->cache[index][0].recency;
+  int freq_low = cache->cache[index][0].freq;
+  int recency_low = cache->cache[index][0].recency;
+  float lfru_freq_low = cache->cache[index][0].lfru_freq;
+  float lfru_recency_low = cache->cache[index][0].lfru_recency;
   int timestamp_low = cache->cache[index][0].timestamp;
   int new_index = 0;
   /* If its LFU DA dynamically age and redo the minimum value */
@@ -81,10 +83,10 @@ void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
       break;
 
     case LRFU:
-      if ((freq_low / recency_low) >
-          (cache->cache[index][i].freq / (cache->cache[index][i].recency*0.5))) {
-        freq_low = cache->cache[index][i].freq;
-        recency_low = cache->cache[index][i].recency;
+      if ((lfru_freq_low / lfru_recency_low) >
+          (cache->cache[index][i].lfru_freq / (cache->cache[index][i].lfru_recency * 0.5))) {
+        freq_low = cache->cache[index][i].lfru_freq;
+        recency_low = cache->cache[index][i].lfru_recency;
         new_index = i;
       }
       break;
@@ -104,8 +106,8 @@ void replace_cache_line(cache_t *cache, uint32_t index, line_t *line) {
 
   if (cache->policy == LRFU) {
     iterate_recencies(cache, index);
-    line->recency = 1.0;
-    line->freq = 1.0;
+    line->lfru_recency = 1;
+    line->lfru_freq = 1;
   }
   /* Replace the new line with the selected index */
   cache->cache[index][new_index] = *line;
@@ -127,11 +129,11 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
         cache->cache[index][i].address == line->address) {
       cache->read_hits++;
       if (cache->policy == LFU_DA) {
-        cache->cache[index][i].freq += cache->min + 1.0;
+        cache->cache[index][i].freq += cache->min + 1;
       } else if (cache->policy == LRFU) {
-        cache->cache[index][i].freq++;
+        cache->cache[index][i].lfru_freq++;
         iterate_recencies(cache, index);
-        cache->cache[index][i].recency = 1.0;
+        cache->cache[index][i].lfru_recency = 1;
       } else {
         cache->cache[index][i].recency = iterator;
         cache->cache[index][i].freq++;
@@ -144,11 +146,11 @@ void read_cache(cache_t *cache, uint32_t index, line_t *line) {
       cache->read_misses++;
       cache->cache[index][i] = *line;
       if (cache->policy == LFU_DA) {
-        cache->cache[index][i].freq += cache->min + 1.0;
+        cache->cache[index][i].freq += cache->min + 1;
       } else if (cache->policy == LRFU) {
-        cache->cache[index][i].freq = 1.0;
+        cache->cache[index][i].lfru_freq = 1;
         iterate_recencies(cache, index);
-        cache->cache[index][i].recency = 1.0;
+        cache->cache[index][i].lfru_recency = 1;
       }
       hit = true;
       break;
@@ -178,11 +180,11 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
         cache->cache[index][i].address == line->address) {
       cache->write_hits++;
       if (cache->policy == LFU_DA) {
-        cache->cache[index][i].freq += cache->min + 1.0;
+        cache->cache[index][i].freq += cache->min + 1;
       } else if (cache->policy == LRFU) {
-        cache->cache[index][i].freq++;
+        cache->cache[index][i].lfru_freq++;
         iterate_recencies(cache, index);
-        cache->cache[index][i].recency = 1.0;
+        cache->cache[index][i].lfru_recency = 1;
       } else {
         cache->cache[index][i].recency = iterator;
         cache->cache[index][i].freq++;
@@ -195,11 +197,11 @@ void write_cache(cache_t *cache, uint32_t index, line_t *line) {
       cache->write_misses++;
       cache->cache[index][i] = *line;
       if (cache->policy == LFU_DA) {
-        cache->cache[index][i].freq += cache->min + 1.0;
+        cache->cache[index][i].freq += cache->min + 1;
       } else if (cache->policy == LRFU) {
-        cache->cache[index][i].freq = 1.0;
+        cache->cache[index][i].lfru_freq = 1;
         iterate_recencies(cache, index);
-        cache->cache[index][i].recency = 1.0;
+        cache->cache[index][i].lfru_recency = 1;
       }
       hit = true;
       break;
@@ -265,8 +267,8 @@ int main() {
   int val = 0;
 
   while (fscanf(file, "%x %c %d\n", &buffer, &type, &val) == 3) {
-    line_t line = {buffer, val, 0.0, iterator, iterator};
-    line_t lrfu_line = {buffer, val, 0.0, 1.0, iterator};
+    line_t line = {buffer, val, 0, iterator, iterator, 0.0, 0.0};
+    line_t lrfu_line = {buffer, val, 0, 1, iterator, 0.0, 1.0};
     check_and_replace_cache(&fifo_cache, &line, type);
     check_and_replace_cache(&lru_cache, &line, type);
     check_and_replace_cache(&lfu_cache, &line, type);
