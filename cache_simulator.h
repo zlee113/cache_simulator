@@ -8,8 +8,8 @@
 #define CACHE_SIMULATOR_H
 
 /* Define the number of sets and ways to easily change */
-#define NUM_OF_SETS (8U)
-#define NUM_OF_WAYS (8U)
+#define NUM_OF_SETS (64U)
+#define NUM_OF_WAYS (64U)
 
 /* Struct for holding information for each way */
 typedef struct {

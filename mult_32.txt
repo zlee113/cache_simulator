@@ -1,0 +1,35 @@
+Stats for FIFO
+Cache Accesses: 101376
+Read Hits:      43619
+Read Misses:    21917
+Write Hits:     8192
+Write Misses:   27648
+
+Stats for LRU
+Cache Accesses: 101376
+Read Hits:      42168
+Read Misses:    23368
+Write Hits:     8192
+Write Misses:   27648
+
+Stats for LFU
+Cache Accesses: 101376
+Read Hits:      21427
+Read Misses:    44109
+Write Hits:     1020
+Write Misses:   34820
+
+Stats for LFRU
+Cache Accesses: 101376
+Read Hits:      45315
+Read Misses:    20221
+Write Hits:     7495
+Write Misses:   28345
+
+Stats for LFU Dynamic Aging
+Cache Accesses: 101376
+Read Hits:      45279
+Read Misses:    20257
+Write Hits:     6715
+Write Misses:   29125
+
