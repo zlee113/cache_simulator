@@ -1,0 +1,315 @@
+diff --git a/src/main/scala/rocket/DCache.scala b/src/main/scala/rocket/DCache.scala
+index 800a321b0..3ee2c6cbe 100644
+--- a/src/main/scala/rocket/DCache.scala
++++ b/src/main/scala/rocket/DCache.scala
+@@ -762,7 +762,10 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
+     val wen = resetting || s2_repl_wen
+     when (wen) { repl_array(waddr) := wdata }
+ 
+-    replacer.get_replace_way(s1_repl_state)
++    //if one of the ones prof made ->
++    //replacer.get_replace_way(s1_repl_state)
++    replacer.get_replace_way(OHToUInt(s2_hit_way), s2_hit_valid)
++
+   } else {
+     replacer.way
+   })
+diff --git a/src/main/scala/rocket/HellaCache.scala b/src/main/scala/rocket/HellaCache.scala
+index 88f3324b7..54179e64a 100644
+--- a/src/main/scala/rocket/HellaCache.scala
++++ b/src/main/scala/rocket/HellaCache.scala
+@@ -19,7 +19,7 @@ case class DCacheParams(
+     nWays: Int = 4,
+     rowBits: Int = 64,
+     subWordBits: Option[Int] = None,
+-    replacementPolicy: String = "random",
++    replacementPolicy: String = "lrfu",
+     nTLBSets: Int = 1,
+     nTLBWays: Int = 32,
+     nTLBBasePageSectors: Int = 4,
+@@ -43,7 +43,7 @@ case class DCacheParams(
+ 
+   def dataScratchpadBytes: Int = scratch.map(_ => nSets*blockBytes).getOrElse(0)
+ 
+-  def replacement = new RandomReplacement(nWays)
++  def replacement = new LRFU(nWays)
+ 
+   def silentDrop: Boolean = !acquireBeforeRelease
+ 
+diff --git a/src/main/scala/util/Replacement.scala b/src/main/scala/util/Replacement.scala
+index 6b581eff4..510c55231 100644
+--- a/src/main/scala/util/Replacement.scala
++++ b/src/main/scala/util/Replacement.scala
+@@ -22,6 +22,7 @@ abstract class ReplacementPolicy {
+     touch_ways.foldLeft(state)((prev, touch_way) => Mux(touch_way.valid, get_next_state(prev, touch_way.bits), prev))
+   }
+   def get_replace_way(state: UInt): UInt
++  def get_replace_way(path: UInt, hit: Bool): UInt
+ }
+ 
+ object ReplacementPolicy {
+@@ -29,6 +30,9 @@ object ReplacementPolicy {
+     case "random" => new RandomReplacement(n_ways)
+     case "lru"    => new TrueLRU(n_ways)
+     case "plru"   => new PseudoLRU(n_ways)
++    case "lfu"    => new TrueLFU(n_ways)
++    case "lrfu"   => new LRFU(n_ways)
++    case "lfu-da" => new LFUDynamicAging(n_ways)
+     case t => throw new IllegalArgumentException(s"unknown Replacement Policy type $t")
+   }
+ }
+@@ -47,6 +51,7 @@ class RandomReplacement(n_ways: Int) extends ReplacementPolicy {
+   def access(touch_way: UInt) = {}
+   def access(touch_ways: Seq[Valid[UInt]]) = {}
+   def get_next_state(state: UInt, touch_way: UInt) = 0.U //DontCare
++  def get_replace_way(path: UInt, hit: Bool): UInt = way 
+   def get_replace_way(state: UInt) = way
+ }
+ 
+@@ -132,12 +137,12 @@ class TrueLRU(n_ways: Int) extends ReplacementPolicy {
+     }
+     OHToUInt(mruWayDec)
+   }
+-
+   def way = get_replace_way(state_reg)
+   def miss = access(way)
+   def hit = {}
+   @deprecated("replace 'replace' with 'way' from abstract class ReplacementPolicy","Rocket Chip 2020.05")
+   def replace: UInt = way
++  def get_replace_way(path: UInt, hit: Bool): UInt = way
+ }
+ 
+ class PseudoLRU(n_ways: Int) extends ReplacementPolicy {
+@@ -266,11 +271,11 @@ class PseudoLRU(n_ways: Int) extends ReplacementPolicy {
+     }
+   }
+ 
+-  def get_replace_way(state: UInt): UInt = get_replace_way(state, n_ways)
+-
++  def get_replace_way(state: UInt): UInt = get_replace_way(state, n_ways) 
+   def way = get_replace_way(state_reg)
+   def miss = access(way)
+   def hit = {}
++  def get_replace_way(path: UInt, hit: Bool): UInt = way
+ }
+ 
+ class SeqPLRU(n_sets: Int, n_ways: Int) extends SeqReplacementPolicy {
+@@ -323,6 +328,217 @@ class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocRepl
+ 
+ }
+ 
++class TrueLFU(n_ways: Int) extends ReplacementPolicy {
++  def nBits = (n_ways * (n_ways-1)) / 2
++  def perSet = true
++  private val state_reg = RegInit(VecInit(Seq.fill(n_ways)(0.U(8.W))))
++  //set up for 8 way caches, figuring out adding variable ways later
++  private val replace_way = Wire(UInt(3.W))
++  private val hit_way = Wire(UInt(3.W))
++  hit_way := 0.U
++
++  //on hit update the table
++  def on_freq_hit(used: UInt): UInt = {
++    val repl = Wire(UInt(3.W))
++    state_reg(used) := state_reg(used) + 1.U
++    repl := used
++    return repl
++  }
++  //on miss find most infrequent
++  def on_freq_miss(): UInt = {
++    val repl = Wire(UInt(3.W))
++    val ind = RegInit(0.U(3.W))
++    val min = RegInit(10000.U(14.W))
++    ffor (i <- 0 until n_ways) {
++      when(state_reg(i) <= min) {
++        min := state_reg(i)
++        ind := i.U
++      }
++    }
++
++    state_reg(ind) := 1.U
++    //binary ind return as the way
++    repl := ind
++    return repl
++  }
++
++  def get_replace_way(path: UInt, hit: Bool): UInt = {
++    if (hit == true.B) {
++      replace_way := on_freq_hit(path)
++    }
++    val ind = RegInit(0.U(3.W))
++    val min = RegInit(10000.U(14.W))
++    for (i <- 0 until n_ways) {
++      when(state_reg(i) <= min) {
++        min := state_reg(i)
++        ind := i.U
++      }
++    }
++    replace_way := ind
++    return replace_way
++  }
++
++  //unneccesaries
++  def access(touch_way: UInt): Unit = {}
++  def access(touch_ways: Seq[Valid[UInt]]): Unit = {}
++  def state_read: UInt = 0.U
++  def get_next_state(state: UInt, touch_way: UInt): UInt = 0.U //dosent matter
++  def get_replace_way(state: UInt) = replace_way
++  //results
++  def miss = on_freq_miss()
++  def hit = {}
++  def way = replace_way
++  def replace: UInt = way
++
++  
++}
++
++
++class LRFU(n_ways: Int) extends ReplacementPolicy {
++  def nBits = (n_ways * (n_ways-1)) / 2
++  def perSet = true
++  private val state_reg = RegInit(VecInit(Seq.fill(n_ways)(0.U(8.W))))
++  private val state_rec = RegInit(VecInit(Seq(1.U, 2.U, 3.U, 4.U, 5.U, 6.U, 7.U, 8.U)))
++  //set up for 8 way caches, figuring out adding variable ways later
++  private val replace_way = Wire(UInt(3.W))
++  private val hit_way = Wire(UInt(3.W))
++  hit_way := 0.U
++  //on hit update the table
++  def on_freq_hit(used: UInt): UInt = {
++    val repl = Wire(UInt(3.W))
++    state_reg(used) := state_reg(used) + 1.U
++    for (i <- 0 until n_ways) {
++      when (state_rec(i) < state_rec(used)) {
++        state_rec(i) := state_rec(i) + 1.U
++      }
++    }
++    state_rec(used) := 1.U
++    repl := used
++    return repl
++  }
++  //on miss find most infrequent
++  def on_freq_miss(): UInt = {
++    val repl = Wire(UInt(3.W))
++    val ind = RegInit(0.U(3.W))
++    val min = RegInit(10000.U(14.W))
++    val weight = RegInit(0.U(5.W))
++    for (i <- 0 until n_ways) {
++      weight := (state_reg(i) / 2.U) + (8.U - state_rec(i))
++      when(weight <= min) {
++        min := weight
++        ind := i.U
++      }
++    }
++    state_reg(ind) := 1.U
++    for (i <- 0 until n_ways) {
++      when (state_rec(i) < state_rec(ind)) {
++        state_rec(i) := state_rec(i) + 1.U
++      }
++    }
++    state_rec(ind) := 1.U
++    repl := ind
++    return repl
++  }
++  
++  def get_replace_way(path: UInt, hit: Bool): UInt = {
++    if (hit == true.B) {
++      replace_way := on_freq_hit(path)
++    }
++    val ind = RegInit(0.U(3.W))
++    val min = RegInit(10000.U(20.W))
++    val weight = RegInit(0.U(5.W))
++    for (i <- 0 until n_ways) {
++      weight := (state_reg(i) / 2.U) + (8.U - state_rec(i))
++      when(weight <= min) {
++        min := weight
++        ind := i.U
++      }
++    }
++    replace_way := ind
++    return replace_way
++  }
++
++  //unneccesaries
++  def access(touch_way: UInt): Unit = {}
++  def access(touch_ways: Seq[Valid[UInt]]): Unit = {}
++  def state_read: UInt = 0.U
++  def get_next_state(state: UInt, touch_way: UInt): UInt = 0.U //dosent matter
++  def get_replace_way(state: UInt) = replace_way
++  //results
++  def miss = on_freq_miss()
++  def hit = {}
++  def way = replace_way
++  def replace: UInt = way
++}
++
++
++class LFUDynamicAging(n_ways: Int) extends ReplacementPolicy {
++  def nBits = (n_ways * (n_ways-1)) / 2
++  def perSet = true
++  private val state_reg = RegInit(VecInit(Seq.fill(n_ways)(0.U(8.W))))
++  //set up for 8 way caches, figuring out adding variable ways later
++  private val replace_way = Wire(UInt(3.W))
++  private val hit_way = Wire(UInt(3.W))
++  hit_way := 0.U
++  private val increment = Wire(UInt(3.W))
++  increment := 0.U
++  //on hit update the table
++  def on_freq_hit(used: UInt): UInt = {
++    val repl = Wire(UInt(3.W))
++    state_reg(used) := state_reg(used) + 1.U + increment
++    repl := used
++    return repl
++  }
++  //on miss find most infrequent
++  def on_freq_miss(): UInt = {
++    val repl = Wire(UInt(3.W))
++    val ind = RegInit(0.U(3.W))
++    val min = RegInit(10000.U(14.W))
++    for (i <- 0 until n_ways) {
++      state_reg(i) := state_reg(i) - increment
++    }
++    for (i <- 0 until n_ways) {
++      when(state_reg(i) <= min) {
++        min := state_reg(i)
++        ind := i.U
++      }
++    }
++    increment := min
++    state_reg(ind) := 1.U + increment
++    //binary ind return as the way
++    repl := ind
++    return repl
++  }
++
++  def get_replace_way(path: UInt, hit: Bool): UInt = {
++    if (hit == true.B) {
++      replace_way := on_freq_hit(path)
++    }
++    val ind = RegInit(0.U(3.W))
++    val min = RegInit(10000.U(14.W))
++    for (i <- 0 until n_ways) {
++      when(state_reg(i) <= min) {
++        min := state_reg(i)
++        ind := i.U
++      }
++    }
++    replace_way := ind
++    return replace_way
++  }
++
++  //unneccesaries
++  def access(touch_way: UInt): Unit = {}
++  def access(touch_ways: Seq[Valid[UInt]]): Unit = {}
++  def state_read: UInt = 0.U
++  def get_next_state(state: UInt, touch_way: UInt): UInt = 0.U //dosent matter
++  def get_replace_way(state: UInt) = replace_way
++  //results
++  def miss = on_freq_miss()
++  def hit = {}
++  def way = replace_way
++  def replace: UInt = way
++}
++
+ /** Synthesizeable unit tests */
+ import freechips.rocketchip.unittest._
+ 
+(END)
